@@ -1,0 +1,33 @@
+{
+  "name": "raft-core",
+  "version": "1.0.0",
+  "description": "Pure RAFT consensus protocol implementation - no HTTP, no Docker, just logic",
+  "main": "index.js",
+  "keywords": [
+    "raft",
+    "consensus",
+    "distributed-systems",
+    "leader-election",
+    "log-replication"
+  ],
+  "author": "CC Project Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "scripts": {
+    "test": "node tests/test-raft-core.js",
+    "debug": "DEBUG=true node replica.js"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "ws": "^8.13.0"
+  },
+  "notes": {
+    "core": "RAFT Core has ZERO runtime dependencies - it's pure JavaScript",
+    "replicas": "Replica instances need express, axios, ws for HTTP and WebSocket",
+    "deployment": "Docker and health checks handled by Team 3"
+  }
+}
