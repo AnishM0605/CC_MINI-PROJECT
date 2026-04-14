@@ -1,7 +1,7 @@
 /**
  * RAFT Core Engine
  * Main orchestrator for the Mini-RAFT consensus protocol
- * 
+ *
  * This module implements pure RAFT logic without HTTP or Docker concerns.
  * The HTTP layer (Express routes) is handled by replica instances.
  */
@@ -54,6 +54,7 @@ class RaftCore {
     // Event callbacks
     this.callbacks = {
       onElectionWon: null,
+      onElectionStarted: null,
       onLeaderChanged: null,
       onEntryCommitted: null,
       onStateChanged: null,
@@ -73,7 +74,7 @@ class RaftCore {
    */
   start() {
     this.logger.info('RAFT Core starting');
-    
+
     // Initialize leader state for followers
     this.otherNodeIds.forEach(followerId => {
       this.logReplication.initializeFollower(followerId, this.nodeState.getLastLogIndex());
@@ -194,7 +195,7 @@ class RaftCore {
     // Reset election timer on any valid AppendEntries from leader
     if (args.term >= this.nodeState.currentTerm && result.success) {
       this._startElectionTimer();
-      
+
       if (args.term > this.nodeState.currentTerm) {
         this.stateMachine.becomeFollower(args.term);
       }
@@ -219,7 +220,7 @@ class RaftCore {
     if (!this.isLeader()) return;
 
     this.logReplication.recordReplication(followerId, lastLogIndex);
-    
+
     // Try to advance commit index
     const advanced = this.logReplication.advanceCommitIndex(this.otherNodeIds);
     if (advanced) {
@@ -262,7 +263,7 @@ class RaftCore {
    */
   applySyncLogResponse(leaderId, entries, commitIndex) {
     const result = this.sync.applySyncLog(leaderId, entries, commitIndex);
-    
+
     if (result) {
       this._processCommittedEntries();
     }
@@ -299,6 +300,13 @@ class RaftCore {
    */
   onElectionWon(callback) {
     this.callbacks.onElectionWon = callback;
+  }
+
+  /**
+   * Register callback for when election starts
+   */
+  onElectionStarted(callback) {
+    this.callbacks.onElectionStarted = callback;
   }
 
   /**
@@ -385,7 +393,7 @@ class RaftCore {
     if (!this.isLeader()) return;
 
     this.logger.heartbeatSent(this.nodeState.currentTerm, this.otherNodeIds.length);
-    
+
     // Heartbeat data is prepared by the replica instances
     // This method just logs that heartbeats should be sent
   }
@@ -410,16 +418,20 @@ class RaftCore {
 
     this.logger.info('Election timeout triggered');
 
-    // Become candidate and start election
-    const newTerm = this.nodeState.currentTerm + 1;
-    this.nodeState.currentTerm = newTerm;
-    this.nodeState.votedFor = this.nodeId;
-    this.stateMachine.becomeCandidate(newTerm);
-
-    // Reset election state for new election
+    // Reset election state and request votes from other nodes
     this.election.resetElectionState();
-    
-    // Start new election timer for this attempt
+    const requestVoteArgs = this.prepareRequestVote();
+    this.stateMachine.becomeCandidate(this.nodeState.currentTerm);
+
+    if (this.callbacks.onElectionStarted) {
+      try {
+        this.callbacks.onElectionStarted(requestVoteArgs);
+      } catch (err) {
+        this.logger.error('Error invoking election started callback', { error: err.message });
+      }
+    }
+
+    // Start a new election timer for this attempt
     this._startElectionTimer();
   }
 
@@ -469,7 +481,7 @@ class RaftCore {
     }
 
     const prevLogIndex = nextIndex - 1;
-    const prevLogTerm = prevLogIndex === -1 
+    const prevLogTerm = prevLogIndex === -1
       ? 0
       : this.nodeState.getLogEntry(prevLogIndex)?.term || 0;
 
@@ -520,7 +532,28 @@ class RaftCore {
     return {
       currentTerm: this.nodeState.currentTerm,
       votedFor: this.nodeState.votedFor,
-      log: this.nodeState.log.map(e => e.toJSON()),
+      log: this.nodeState.log.map((entry, idx) => {
+        try {
+          if (entry && typeof entry.toJSON === 'function') {
+            return entry.toJSON();
+          }
+        } catch (err) {
+          // If toJSON exists but throws or isn't callable, fallback to manual serialization
+          this.logger.warn('Failed to serialize log entry via toJSON, falling back', {
+            idx,
+            entryType: typeof entry,
+            error: err.message,
+          });
+        }
+
+        return {
+          index: entry?.index ?? idx,
+          term: entry?.term ?? this.nodeState.currentTerm,
+          type: entry?.type ?? null,
+          data: entry?.data ?? null,
+          createdAt: entry?.createdAt ?? new Date().toISOString(),
+        };
+      }),
     };
   }
 
@@ -538,8 +571,8 @@ class RaftCore {
     }
     if (state.log && Array.isArray(state.log)) {
       const LogEntry = require('./models/logEntry');
-      this.nodeState.log = state.log.map((entry, idx) => {
-        return new LogEntry(idx, entry.term, entry.type, entry.data);
+      this.nodeState.log = state.log.map((entry) => {
+        return LogEntry.fromJSON(entry);
       });
     }
 

@@ -117,7 +117,7 @@ class LogReplication {
     let possibleNewCommitIndex = oldCommitIndex;
 
     for (let index = this.nodeState.getLastLogIndex(); index > oldCommitIndex; index--) {
-      const replicatedCount = 1; // Count self
+      let replicatedCount = 1; // Count self
 
       for (const nodeId of otherNodes) {
         const matchIndex = this.nodeState.matchIndex[nodeId] || -1;

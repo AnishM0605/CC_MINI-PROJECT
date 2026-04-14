@@ -17,7 +17,8 @@
   },
   "scripts": {
     "test": "node tests/test-raft-core.js",
-    "debug": "DEBUG=true node replica.js"
+    "debug": "DEBUG=true node replica.js",
+    "start-cluster": "node start-cluster.js"
   },
   "dependencies": {},
   "devDependencies": {

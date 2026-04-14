@@ -276,19 +276,20 @@ The implementation ensures:
 
 ✅ **Durability**: Committed entries survive crash-recovery via persistence layer integration.
 
-## 📋 Checklist: What Team 3 Needs to Do
+## 📋 Current Status: Team 3 Implementation
 
-- [ ] Create replica server instances (3 of them)
-- [ ] Wrap RaftCore in Express app with HTTP endpoints
-- [ ] Implement heartbeat loop (150ms, send AppendEntries)
-- [ ] Implement election request loop (send RequestVote)
-- [ ] Handle RPC responses and call appropriate RAFT methods
-- [ ] Add state persistence (save/load from disk)
-- [ ] Notify Gateway when leadership changes
-- [ ] Broadcast committed entries to Gateway
-- [ ] Setup Docker containers with nodemon/hot reload
+- [x] Create replica server instances (3 of them) - replica1.js, replica2.js, replica3.js
+- [x] Wrap RaftCore in Express app with HTTP endpoints - 6 endpoints per replica
+- [x] Implement heartbeat loop (150ms, send AppendEntries) - implemented
+- [x] Implement election request loop (send RequestVote) - implemented
+- [x] Handle RPC responses and call appropriate RAFT methods - implemented
+- [x] Add state persistence (save/load from disk) - JSON files with recovery
+- [x] Notify Gateway when leadership changes - onElectionWon callback
+- [x] Broadcast committed entries to Gateway - onEntryCommitted callback
+- [x] Setup cluster launcher script - start-cluster.js
+- [ ] Complete end-to-end testing with frontend
 - [ ] Test failover and recovery scenarios
-- [ ] Verify with team member who did Gateway updates
+- [ ] Verify Gateway integration works
 
 ## 🔗 Dependencies
 
