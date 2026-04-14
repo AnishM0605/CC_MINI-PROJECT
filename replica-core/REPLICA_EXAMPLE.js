@@ -1,7 +1,7 @@
 /**
  * Example Replica Server Implementation
  * This file shows how to use the RAFT Core in an Express server
- * 
+ *
  * The third team member should adapt this for the actual replica instances
  * with proper Docker integration and state persistence
  */
@@ -17,23 +17,23 @@ class ReplicaServer {
     this.nodeId = nodeId;
     this.nodePort = nodePort;
     this.otherNodes = otherNodes; // Array of { id, url }
-    
+
     // Initialize RAFT core
     const otherNodeIds = otherNodes.map(n => n.id).filter(id => id !== nodeId);
     this.raftCore = new RaftCore(nodeId, otherNodeIds);
-    
+
     // State persistence
     this.stateFile = path.join(__dirname, `state-${nodeId}.json`);
     this.loadPersistedState();
-    
+
     // Apply log tracking
     this.appliedIndices = new Set();
-    
+
     // Express app
     this.app = express();
     this.app.use(express.json());
     this.setupRoutes();
-    
+
     // Register RAFT callbacks
     this.setupCallbacks();
   }
@@ -44,21 +44,21 @@ class ReplicaServer {
   setupRoutes() {
     // Client request: someone sends a stroke
     this.app.post('/client-request', this._handleClientRequest.bind(this));
-    
+
     // RAFT RequestVote RPC
     this.app.post('/request-vote', this._handleRequestVote.bind(this));
-    
+
     // RAFT AppendEntries RPC (heartbeat and log replication)
     this.app.post('/append-entries', this._handleAppendEntries.bind(this));
-    
+
     // RAFT SyncLog RPC (catch-up sync)
     this.app.post('/sync-log', this._handleSyncLog.bind(this));
-    
+
     // Health and status
     this.app.get('/health', this._handleHealth.bind(this));
     this.app.get('/status', this._handleStatus.bind(this));
     this.app.get('/snapshot', this._handleSnapshot.bind(this));
-    
+
     // Broadcast from other replicas (leader broadcasts committed entries)
     this.app.post('/broadcast', this._handleBroadcast.bind(this));
   }
@@ -70,6 +70,11 @@ class ReplicaServer {
     this.raftCore.onElectionWon((term) => {
       console.log(`[${this.nodeId}] WON ELECTION - TERM ${term}`);
       this.handleLeadershipGained(term);
+    });
+
+    this.raftCore.onElectionStarted((args) => {
+      console.log(`[${this.nodeId}] Starting election for term ${args.term}`);
+      this.requestVotes(args).catch(err => console.error('Election request failed:', err.message));
     });
 
     this.raftCore.onEntryCommitted((entry) => {
@@ -89,7 +94,7 @@ class ReplicaServer {
   async _handleClientRequest(req, res) {
     try {
       const { type, data } = req.body;
-      
+
       if (!this.raftCore.isLeader()) {
         const leader = this.findLeader();
         return res.status(400).json({
@@ -127,7 +132,7 @@ class ReplicaServer {
   async _handleAppendEntries(req, res) {
     try {
       const result = this.raftCore.handleAppendEntries(req.body);
-      
+
       // If we're out of sync, request sync
       if (!result.success && req.body.entries?.length > 0) {
         const syncRequest = this.raftCore.checkAndRequestSync(
@@ -135,17 +140,21 @@ class ReplicaServer {
           req.body.prevLogIndex,
           req.body.prevLogTerm
         );
-        
+
         if (syncRequest) {
           // Request sync in background
           this.requestSyncLog(req.body.leaderId, syncRequest.fromIndex)
-            .catch(err => console.error('Sync request failed:', err));
+            .catch(err => {
+              console.error('Sync request failed:', err.message);
+              console.error(err.stack);
+            });
         }
       }
 
       res.json(result);
     } catch (err) {
-      console.error('Error handling append entries:', err);
+      console.error('Error handling append entries:', err.message);
+      console.error(err.stack);
       res.status(500).json({ error: err.message });
     }
   }
@@ -192,10 +201,10 @@ class ReplicaServer {
 
   async handleLeadershipGained(term) {
     console.log(`[${this.nodeId}] Becoming leader in term ${term}`);
-    
+
     // Notify gateway of new leader
     await this.notifyGatewayOfLeader();
-    
+
     // Start regular replication
     this.startReplicationLoop();
   }
@@ -227,25 +236,35 @@ class ReplicaServer {
   async replicateToFollowers() {
     if (!this.raftCore.isLeader()) return;
 
-    const otherNodeIds = this.raftCore.otherNodeIds;
+    let otherNodeIds = this.raftCore.otherNodeIds;
 
     for (const nodeId of otherNodeIds) {
-      const appendEntries = this.raftCore.prepareAppendEntries(nodeId);
+      let appendEntries = this.raftCore.prepareAppendEntries(nodeId);
       if (!appendEntries) continue;
 
-      const node = this.otherNodes.find(n => n.id === nodeId);
+      let node = this.otherNodes.find(n => n.id === nodeId);
       if (!node) continue;
 
       try {
-        const response = await axios.post(`${node.url}/append-entries`, appendEntries);
-        
+        let response = await axios.post(`${node.url}/append-entries`, appendEntries, {
+          timeout: 3000,
+        });
+
         if (response.data.success) {
           this.raftCore.handleReplicationSuccess(nodeId, response.data.lastLogIndex);
         } else {
           this.raftCore.handleReplicationFailure(nodeId, response.data.conflictIndex);
         }
       } catch (err) {
-        console.error(`Error replicating to ${nodeId}:`, err.message);
+        console.error(`Error replicating to ${nodeId}:`, err.name || 'AxiosError');
+        console.error('  message:', err.message || err.toString());
+        console.error('  code:', err.code || 'N/A');
+        if (err.response) {
+          console.error('  status:', err.response.status);
+          console.error('  body:', err.response.data);
+        }
+        console.error('  config url:', err.config?.url);
+        console.error(err.stack);
         this.raftCore.handleReplicationFailure(nodeId);
       }
     }
@@ -267,21 +286,52 @@ class ReplicaServer {
   }
 
   async requestSyncLog(leaderId, fromIndex) {
-    const leader = this.otherNodes.find(n => n.id === leaderId);
+    let leader = this.otherNodes.find(n => n.id === leaderId);
     if (!leader) return;
 
     try {
-      const response = await axios.post(`${leader.url}/sync-log`, {
+      let response = await axios.post(`${leader.url}/sync-log`, {
         followerId: this.nodeId,
         fromIndex,
+      }, {
+        timeout: 3000,
       });
 
       if (response.data.success) {
         this.raftCore.applySyncLogResponse(leaderId, response.data.entries, response.data.commitIndex);
       }
     } catch (err) {
-      console.error('Sync log request failed:', err.message);
+      console.error('Sync log request failed:', err.name || 'AxiosError');
+      console.error('  message:', err.message || err.toString());
+      console.error('  code:', err.code || 'N/A');
+      console.error('  config url:', err.config?.url);
+      console.error(err.stack);
     }
+  }
+
+  async requestVotes(requestVoteArgs) {
+    const votePromises = this.otherNodes.map(async (node) => {
+      try {
+        let response = await axios.post(`${node.url}/request-vote`, requestVoteArgs, { timeout: 3000 });
+        let data = response.data;
+
+        if (data.term > this.raftCore.getTerm()) {
+          this.raftCore.nodeState.currentTerm = data.term;
+          this.raftCore.nodeState.votedFor = null;
+          this.raftCore.stateMachine.becomeFollower(data.term);
+        }
+
+        this.raftCore.recordVoteResponse(data.voteGranted);
+      } catch (err) {
+        console.warn(`[${this.nodeId}] Vote request to ${node.id} failed:`, err.name || 'AxiosError');
+        console.warn('  message:', err.message || err.toString());
+        console.warn('  code:', err.code || 'N/A');
+        console.warn('  config url:', err.config?.url);
+        console.warn(err.stack);
+      }
+    });
+
+    await Promise.all(votePromises);
   }
 
   async notifyGatewayOfLeader() {
@@ -353,7 +403,7 @@ class ReplicaServer {
 
   start() {
     this.raftCore.start();
-    
+
     this.server = this.app.listen(this.nodePort, () => {
       console.log(`[${this.nodeId}] Server listening on port ${this.nodePort}`);
     });
@@ -368,7 +418,7 @@ class ReplicaServer {
 
   stop() {
     this.raftCore.stop();
-    
+
     if (this.server) {
       this.server.close();
     }

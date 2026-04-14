@@ -4,28 +4,41 @@ const { replicas } = require('./config');
 
 async function forwardToLeader(stroke) {
   let leader = getLeader();
+  const attempted = new Set();
 
-  try {
-    await axios.post(`${leader}/client-request`, stroke);
-  } catch (err) {
-    console.log("Leader failed. Trying others...");
+  async function tryPost(url) {
+    if (attempted.has(url)) return false;
+    attempted.add(url);
 
-    // Try other replicas (failover)
-    for (let r of replicas) {
-      if (r === leader) continue;
-
-      try {
-        await axios.post(`${r}/client-request`, stroke);
-        setLeader(r);
-        console.log("Switched leader to", r);
-        return;
-      } catch (e) {
-        continue;
+    try {
+      await axios.post(`${url}/client-request`, stroke, { timeout: 3000 });
+      return true;
+    } catch (err) {
+      const response = err.response?.data;
+      if (response?.leaderUrl && response.leaderUrl !== leader) {
+        setLeader(response.leaderUrl);
+        leader = response.leaderUrl;
       }
+      return false;
     }
-
-    console.error("All replicas unreachable");
   }
+
+  if (await tryPost(leader)) {
+    return;
+  }
+
+  console.log('Leader failed. Trying other replicas...');
+
+  for (let r of replicas) {
+    if (attempted.has(r)) continue;
+    if (await tryPost(r)) {
+      setLeader(r);
+      console.log('Switched leader to', r);
+      return;
+    }
+  }
+
+  console.error('All replicas unreachable or no leader available');
 }
 
 module.exports = { forwardToLeader };

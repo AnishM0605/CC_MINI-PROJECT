@@ -69,7 +69,18 @@ class NodeState {
    * Append multiple entries to log
    */
   appendEntries(entries) {
-    this.log.push(...entries);
+    const LogEntry = require('./logEntry');
+    const normalizedEntries = entries.map((entry) => {
+      if (entry instanceof LogEntry) {
+        return entry;
+      }
+      if (entry && entry.term != null && entry.type != null) {
+        return LogEntry.fromJSON(entry);
+      }
+      return entry;
+    });
+
+    this.log.push(...normalizedEntries);
   }
 
   /**
