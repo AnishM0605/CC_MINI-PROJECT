@@ -31,7 +31,7 @@ class ReplicaServer {
 
     // Express app
     this.app = express();
-    this.app.use(express.json());
+    this.app.use(express.json({ limit: '50mb' }));
     this.setupRoutes();
 
     // Register RAFT callbacks
@@ -135,22 +135,20 @@ class ReplicaServer {
 
       // If we're out of sync, request sync
       if (!result.success && req.body.entries?.length > 0) {
-        const syncRequest = this.raftCore.checkAndRequestSync(
-          req.body.leaderId,
-          req.body.prevLogIndex,
-          req.body.prevLogTerm
-        );
+  const syncRequest = this.raftCore.checkAndRequestSync(
+    req.body.leaderId,
+    req.body.prevLogIndex,
+    req.body.prevLogTerm
+  );
 
-        if (syncRequest) {
-          // Request sync in background
-          this.requestSyncLog(req.body.leaderId, syncRequest.fromIndex)
-            .catch(err => {
-              console.error('Sync request failed:', err.message);
-              console.error(err.stack);
-            });
-        }
-      }
-
+  // ✅ FIX: prevent infinite sync loop
+  if (syncRequest && syncRequest.fromIndex <= this.raftCore.log.length) {
+    this.requestSyncLog(req.body.leaderId, syncRequest.fromIndex)
+      .catch(err => {
+        console.warn(`[${this.nodeId}] Sync request skipped/failed`);
+      });
+  }
+}
       res.json(result);
     } catch (err) {
       console.error('Error handling append entries:', err.message);

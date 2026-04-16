@@ -1,18 +1,60 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Distributed Drawing Board</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div class="app-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Real-time Collaboration</p>
+        <h1>Distributed Drawing Board</h1>
+        <p class="lead">Draw together across browser tabs. Your strokes are sent through the Gateway and synchronized by the RAFT-backed replica cluster.</p>
+        <div class="hero-badges">
+          <span class="badge">Live sync</span>
+          <span class="badge">RAFT-backed</span>
+          <span class="badge">Touch friendly</span>
+        </div>
+      </div>
+    </header>
 
-<h2>Real-Time Drawing Board</h2>
+    <section class="toolbar" aria-label="Drawing controls">
+      <div class="toolbar-item">
+        <label for="color-picker">Brush Color</label>
+        <input id="color-picker" type="color" value="#1d4ed8" aria-label="Choose brush color">
+      </div>
 
-<canvas id="board"></canvas>
+      <div class="toolbar-item">
+        <label for="brush-size">Brush Size</label>
+        <input id="brush-size" type="range" min="1" max="20" value="4" aria-label="Choose brush size">
+        <span id="brush-size-value">4</span> px
+      </div>
 
-<script src="websocket.js"></script>
-<script src="draw.js"></script>
-<script src="app.js"></script>
+      <div class="toolbar-item">
+        <button id="clear-btn" type="button">Clear Canvas</button>
+        <button id="reconnect-btn" type="button">Reconnect</button>
+      </div>
+    </section>
 
+    <section class="canvas-panel">
+      <div class="canvas-header">
+        <div class="status-pill status disconnected" id="status">Disconnected</div>
+        <div class="meta-info"><span id="strokes">Strokes: 0</span></div>
+      </div>
+
+      <div class="canvas-wrapper">
+        <canvas id="board" aria-label="Drawing board"></canvas>
+      </div>
+
+      <p class="hint">Use mouse or touch to draw. The board reconnects automatically if the Gateway is temporarily unavailable.</p>
+    </section>
+  </div>
+
+  <script src="websocket.js"></script>
+  <script src="draw.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
