@@ -3,10 +3,17 @@ const router = express.Router();
 const { broadcast } = require('../broadcastService');
 
 router.post('/', (req, res) => {
-  const stroke = req.body;
+  const entry = req.body;
 
-  // Broadcast ONLY committed strokes
-  broadcast(stroke);
+  // Ensure it's a stroke entry
+  if (entry.type === "stroke" && entry.data) {
+    console.log("Broadcasting committed stroke:", entry.data);
+
+    broadcast({
+      type: "stroke",
+      data: entry.data
+    });
+  }
 
   res.send({ status: "ok" });
 });

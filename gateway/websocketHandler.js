@@ -17,8 +17,12 @@ function handleConnection(ws) {
     }
   });
 
-  ws.on('close', () => {
-    console.log("Client disconnected");
+  ws.on('error', (err) => {
+    console.error("WebSocket client error:", err);
+  });
+
+  ws.on('close', (code, reason) => {
+    console.log("Client disconnected", { code, reason: reason?.toString() });
     removeClient(ws);
   });
 }
