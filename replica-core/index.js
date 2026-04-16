@@ -2,7 +2,7 @@
  * RAFT Core Engine
  * Main orchestrator for the Mini-RAFT consensus protocol
  *
- * This module implements pure RAFT logic without HTTP or Docker concerns.
+ * The module implements pure RAFT logic without HTTP or Docker concerns.
  * The HTTP layer (Express routes) is handled by replica instances.
  */
 
@@ -564,7 +564,7 @@ class RaftCore {
   restoreState(state) {
     if (state.currentTerm) {
       this.nodeState.currentTerm = state.currentTerm;
-      this.termManager.currentTerm = state.currentTerm;
+      this.termManager.currentTerm = state.currentTerm; 
     }
     if (state.votedFor) {
       this.nodeState.votedFor = state.votedFor;
