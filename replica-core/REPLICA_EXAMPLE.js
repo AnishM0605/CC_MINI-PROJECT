@@ -133,22 +133,8 @@ class ReplicaServer {
     try {
       const result = this.raftCore.handleAppendEntries(req.body);
 
-      // If we're out of sync, request sync
-      if (!result.success && req.body.entries?.length > 0) {
-  const syncRequest = this.raftCore.checkAndRequestSync(
-    req.body.leaderId,
-    req.body.prevLogIndex,
-    req.body.prevLogTerm
-  );
-
-  // ✅ FIX: prevent infinite sync loop
-  if (syncRequest && syncRequest.fromIndex <= this.raftCore.log.length) {
-    this.requestSyncLog(req.body.leaderId, syncRequest.fromIndex)
-      .catch(err => {
-        console.warn(`[${this.nodeId}] Sync request skipped/failed`);
-      });
-  }
-}
+      // Note: Sync detection and requests are handled by the leader,
+      // not the follower. Just return the append entries result.
       res.json(result);
     } catch (err) {
       console.error('Error handling append entries:', err.message);
@@ -251,7 +237,23 @@ class ReplicaServer {
         if (response.data.success) {
           this.raftCore.handleReplicationSuccess(nodeId, response.data.lastLogIndex);
         } else {
+          // Replication failed - check if sync is needed
           this.raftCore.handleReplicationFailure(nodeId, response.data.conflictIndex);
+
+          // Check if we need to request sync for this follower
+          const syncRequest = this.raftCore.checkAndRequestSync(
+            this.nodeId,  // leaderId
+            appendEntries.prevLogIndex,
+            appendEntries.prevLogTerm
+          );
+
+          if (syncRequest) {
+            console.log(`[${this.nodeId}] Requesting sync for ${nodeId} from index ${syncRequest.fromIndex}`);
+            this.requestSyncLog(nodeId, syncRequest.fromIndex)
+              .catch(err => {
+                console.warn(`[${this.nodeId}] Sync request failed for ${nodeId}`);
+              });
+          }
         }
       } catch (err) {
         console.error(`Error replicating to ${nodeId}:`, err.name || 'AxiosError');

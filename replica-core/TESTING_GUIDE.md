@@ -1,6 +1,6 @@
 /**
  * RAFT Core Testing Guide
- * 
+ *
  * How to validate RAFT core implementation
  * Run: node tests/test-raft-core.js
  */
@@ -10,18 +10,18 @@
 // ============================================================================
 function testSingleNodeElection() {
   console.log('\n=== TEST 1: Single Node Election ===');
-  
+
   const RaftCore = require('../index');
   const node = new RaftCore('node1', []);
-  
+
   node.start();
-  
+
   // Wait for election timeout
   setTimeout(() => {
     console.assert(node.isLeader(), 'Single node should become leader');
     console.assert(node.getTerm() === 1, 'Term should be 1 after election');
     console.log('✓ Single node became leader');
-    
+
     node.stop();
     testThreeNodeCluster();
   }, 1000);
@@ -32,52 +32,52 @@ function testSingleNodeElection() {
 // ============================================================================
 function testThreeNodeCluster() {
   console.log('\n=== TEST 2: Three Node Cluster Election ===');
-  
+
   const RaftCore = require('../index');
-  
+
   const node1 = new RaftCore('node1', ['node2', 'node3']);
   const node2 = new RaftCore('node2', ['node1', 'node3']);
   const node3 = new RaftCore('node3', ['node1', 'node2']);
-  
+
   // Simulate network: nodes can talk to each other
   const network = {
     'node1': node1,
     'node2': node2,
     'node3': node3
   };
-  
+
   // Start all nodes
   node1.start();
   node2.start();
   node3.start();
-  
+
   let leaderFound = false;
   let electionTimeout = 2000; // Wait up to 2 seconds
-  
+
   const checkLeaders = setInterval(() => {
     const states = [node1, node2, node3].map(n => ({
       id: n.nodeId,
       state: n.getState(),
       term: n.getTerm()
     }));
-    
+
     const leaders = states.filter(s => s.state === 'LEADER');
-    
+
     if (leaders.length === 1 && !leaderFound) {
       leaderFound = true;
       console.log('✓ Exactly one leader elected:', leaders[0].id);
       console.log('  Leader term:', leaders[0].term);
-      
+
       // Verify all nodes know about leader
       const allTermsSame = states.every(s => s.term === leaders[0].term);
       console.assert(allTermsSame, 'All nodes should have same term');
       console.log('✓ All nodes synchronized on term:', leaders[0].term);
-      
+
       clearInterval(checkLeaders);
       testClientRequest(node1, node2, node3, network);
     }
   }, 100);
-  
+
   setTimeout(() => {
     clearInterval(checkLeaders);
     if (!leaderFound) {
@@ -91,26 +91,26 @@ function testThreeNodeCluster() {
 // ============================================================================
 function testClientRequest(node1, node2, node3, network) {
   console.log('\n=== TEST 3: Client Request to Leader ===');
-  
+
   const leader = [node1, node2, node3].find(n => n.isLeader());
   if (!leader) {
     console.error('✗ No leader available');
     return;
   }
-  
+
   console.log('Sending stroke to leader:', leader.nodeId);
-  
+
   // Client sends stroke to leader
   const strokeData = { x1: 10, y1: 20, x2: 30, y2: 40, color: '#FF0000' };
   const result = leader.clientRequest('stroke', strokeData);
-  
+
   console.assert(result !== null, 'Leader should accept client request');
   console.assert(result.index === 0, 'First entry should be at index 0');
   console.assert(result.term === leader.getTerm(), 'Entry term should match current term');
   console.log('✓ Entry appended to leader log');
   console.log('  Index:', result.index);
   console.log('  Term:', result.term);
-  
+
   testLogReplication(node1, node2, node3, network);
 }
 
@@ -119,18 +119,18 @@ function testClientRequest(node1, node2, node3, network) {
 // ============================================================================
 function testLogReplication(node1, node2, node3, network) {
   console.log('\n=== TEST 4: Log Replication ===');
-  
+
   const leader = [node1, node2, node3].find(n => n.isLeader());
   const followers = [node1, node2, node3].filter(n => !n.isLeader());
-  
+
   // Simulate AppendEntries RPC
   console.log('Simulating AppendEntries replication...');
-  
+
   followers.forEach(follower => {
     const appendEntries = leader.prepareAppendEntries(follower.nodeId);
     if (appendEntries) {
       const response = follower.handleAppendEntries(appendEntries);
-      
+
       if (response.success) {
         console.log(`✓ ${follower.nodeId} replicated entries`);
         leader.handleReplicationSuccess(follower.nodeId, response.lastLogIndex);
@@ -139,16 +139,16 @@ function testLogReplication(node1, node2, node3, network) {
       }
     }
   });
-  
+
   // Check that all nodes have same log
   setTimeout(() => {
     const logLengths = [node1, node2, node3].map(n => n.nodeState.log.length);
     const allSame = logLengths.every(len => len === logLengths[0]);
-    
+
     console.assert(allSame, 'All nodes should have same log length');
     console.log('✓ All nodes synchronized log');
     console.log('  Log length:', logLengths[0]);
-    
+
     testCommit(node1, node2, node3);
   }, 500);
 }
@@ -158,19 +158,19 @@ function testLogReplication(node1, node2, node3, network) {
 // ============================================================================
 function testCommit(node1, node2, node3) {
   console.log('\n=== TEST 5: Entry Commitment ===');
-  
+
   const leader = [node1, node2, node3].find(n => n.isLeader());
   const info = leader.getNodeInfo();
-  
+
   console.log('Leader state:');
   console.log('  Commit Index:', info.commitIndex);
   console.log('  Last Log Index:', info.lastLogIndex);
-  
+
   // Advance commitIndex (simulating majority quorum)
   const committed = leader.logReplication.getUnappliedCommittedEntries();
   console.log('✓ Committed entries tracked');
   console.log('  Count:', committed.length);
-  
+
   testTermVerfication();
 }
 
@@ -179,27 +179,27 @@ function testCommit(node1, node2, node3) {
 // ============================================================================
 function testTermVerfication() {
   console.log('\n=== TEST 6: Term Safety ===');
-  
+
   const RaftCore = require('../index');
   const node1 = new RaftCore('node1', ['node2']);
   const node2 = new RaftCore('node2', ['node1']);
-  
+
   // Test higher term wins
   const initialTerm = node1.getTerm();
   const higher = initialTerm + 5;
-  
+
   const response = node1.handleRequestVote({
     term: higher,
     candidateId: 'node2',
     lastLogIndex: 0,
     lastLogTerm: 0
   });
-  
+
   console.assert(response.voteGranted === true, 'Should grant vote to higher term');
   console.assert(node1.getTerm() === higher, 'Should update to higher term');
   console.log('✓ Higher term is always accepted');
   console.log('  Updated from term', initialTerm, 'to', higher);
-  
+
   // Test stale term is ignored
   const responseStale = node1.handleRequestVote({
     term: 1,
@@ -207,10 +207,10 @@ function testTermVerfication() {
     lastLogIndex: 0,
     lastLogTerm: 0
   });
-  
+
   console.assert(responseStale.voteGranted === false, 'Should reject stale term');
   console.log('✓ Stale term is rejected');
-  
+
   testLeaderFailover();
 }
 
@@ -219,30 +219,30 @@ function testTermVerfication() {
 // ============================================================================
 function testLeaderFailover() {
   console.log('\n=== TEST 7: Leader Failover ===');
-  
+
   const RaftCore = require('../index');
-  
+
   const node1 = new RaftCore('node1', ['node2', 'node3']);
   const node2 = new RaftCore('node2', ['node1', 'node3']);
   const node3 = new RaftCore('node3', ['node1', 'node2']);
-  
+
   node1.start();
   node2.start();
   node3.start();
-  
+
   setTimeout(() => {
     let leader1 = [node1, node2, node3].find(n => n.isLeader());
     console.log('✓ Initial leader elected:', leader1.nodeId);
-    
+
     // Simulate leader failure by stopping it
     console.log('Simulating leader failure...');
     leader1.stop();
-    
+
     // Wait for election timeout on others
     setTimeout(() => {
       const remaining = [node1, node2, node3].filter(n => n !== leader1);
       const newLeaders = remaining.filter(n => n.isLeader());
-      
+
       if (newLeaders.length === 1) {
         console.log('✓ New leader elected:', newLeaders[0].nodeId);
         console.log('  Previous leader:', leader1.nodeId);
@@ -260,27 +260,27 @@ function testLeaderFailover() {
 // ============================================================================
 function testSync() {
   console.log('\n=== TEST 8: Catch-Up Sync (Restarted Node) ===');
-  
+
   const RaftCore = require('../index');
-  
+
   // Create cluster
   const node1 = new RaftCore('node1', ['node2', 'node3']);
   const node2 = new RaftCore('node2', ['node1', 'node3']);
   const node3 = new RaftCore('node3', ['node1', 'node2']);
-  
+
   node1.start();
   node2.start();
   node3.start();
-  
+
   setTimeout(() => {
     const leader = [node1, node2, node3].find(n => n.isLeader());
     const followers = [node1, node2, node3].filter(n => !n.isLeader());
-    
+
     // Add entries to log
     for (let i = 0; i < 5; i++) {
       leader.clientRequest('stroke', { x: i * 10, y: i * 20 });
     }
-    
+
     // Replicate to followers
     followers.forEach(follower => {
       const ae = leader.prepareAppendEntries(follower.nodeId);
@@ -289,53 +289,53 @@ function testSync() {
         leader.handleReplicationSuccess(follower.nodeId, resp.lastLogIndex);
       }
     });
-    
+
     setTimeout(() => {
       console.log('Log synchronized across cluster');
       console.log('  Leader log length:', leader.nodeState.log.length);
-      
+
       // Simulate node restart
       let stoppedNode = followers[0];
       const stoppedNodeId = stoppedNode.nodeId;
       console.log('\nSimulating restart of:', stoppedNodeId);
-      
+
       // In real scenario: node would reload from disk and be empty or partial
       // For this test: we'll clear its log to simulate it being behind
       stoppedNode.stop();
-      
+
       // Create new instance (empty)
       const restartedNode = new RaftCore(stoppedNodeId, [
         [node1, node2, node3].filter(n => n.nodeId !== stoppedNodeId).map(n => n.nodeId)
       ].flat());
-      
+
       restartedNode.start();
-      
+
       // Try AppendEntries - should fail due to log mismatch
       setTimeout(() => {
         const ae = leader.prepareAppendEntries(stoppedNodeId);
-        
+
         // Manually handle on restarted node
         const resp = restartedNode.handleAppendEntries(ae);
-        
+
         if (!resp.success) {
           console.log('✓ Log mismatch detected as expected');
-          
+
           // Request sync
           const syncReq = restartedNode.checkAndRequestSync(
             leader.nodeId,
             ae.prevLogIndex,
             ae.prevLogTerm
           );
-          
+
           if (syncReq) {
             console.log('✓ Node requested sync');
-            
+
             // Leader responds with sync
             const syncResp = leader.handleSyncLog(syncReq.followerId, syncReq.fromIndex);
-            
+
             // Node applies sync
             restartedNode.applySyncLogResponse(leader.nodeId, syncResp.entries, syncResp.commitIndex);
-            
+
             console.log('✓ Node synchronized');
             console.log('  Entries received:', syncResp.entries.length);
             console.log('  Now has', restartedNode.nodeState.log.length, 'entries');
@@ -358,7 +358,7 @@ testSingleNodeElection();
 
 /**
  * EXPECTED OUTPUT
- * 
+ *
  * ✓ Single node became leader
  * ✓ Exactly one leader elected
  * ✓ All nodes synchronized on term
@@ -413,4 +413,81 @@ Before deployment, verify manually:
     - Minority partition should NOT elect leader
     - Majority partition should elect and work normally
     - When healed, minority should accept majority's state
+*/
+
+// ============================================================================
+// END-TO-END SYSTEM TESTING
+// ============================================================================
+
+/*
+Complete system validation: RAFT cluster + Gateway + Frontend
+
+1. START REPLICA CLUSTER:
+   cd replica-core
+   node start-cluster.js
+
+   Expected: 3 replicas start, leader elected (usually replica2), heartbeats flowing
+
+2. START GATEWAY:
+   cd gateway
+   npm install
+   node server.js
+
+   Expected: Gateway starts on port 3000, connects to leader, logs "Connected to leader: replicaX"
+
+3. START FRONTEND:
+   cd frontend
+   python -m http.server 8080  (or use any static server)
+
+   Expected: Browser opens to http://localhost:8080, canvas loads
+
+4. TEST DRAWING SYNCHRONIZATION:
+   - Open multiple browser tabs to http://localhost:8080
+   - Draw in one tab
+   - Verify strokes appear in other tabs within 1-2 seconds
+
+5. TEST LEADER FAILOVER:
+   - Kill current leader (Ctrl+C in its terminal)
+   - Wait 1-2 seconds
+   - Verify new leader elected
+   - Verify drawing still works across tabs
+
+KNOWN ISSUES FROM LOGS (2026-04-18):
+
+- Replica3 frequently times out and starts elections (terms 406-445)
+- Replica3 not receiving heartbeats from leader (replica2)
+- Replica1 and replica2 working correctly: commits, replication, sync
+- Root cause: Likely network isolation or heartbeat delivery failure to replica3
+- Impact: replica3 remains follower but doesn't participate in consensus
+- Workaround: For testing, proceed with replica1+replica2 (majority quorum)
+- Fix needed: Investigate replica3 heartbeat reception
+
+TROUBLESHOOTING STEPS:
+
+1. Check replica3 logs for heartbeat messages
+2. Verify replica3 server is running and listening on port 5003
+3. Test direct HTTP calls between replicas
+4. Check for firewall/network blocking port 5003
+5. Monitor heartbeat intervals (should be ~100ms)
+
+EXPECTED LOG PATTERNS:
+
+✓ Leader election: "INFO: Election won { term: X }"
+✓ Heartbeats: "INFO: Heartbeat sent to replicaX"
+✓ Log replication: "INFO: Entry appended to log { index: X }"
+✓ Commits: "INFO: Entry COMMITTED { index: X }"
+✓ Sync: "INFO: Sync log applied { entriesCount: X }"
+
+✗ Replica3 issues: "INFO: Election timeout triggered" (repeated)
+✗ Sync failures: "Out of sync, requesting sync" (but timeouts)
+
+SUCCESS CRITERIA:
+
+- [ ] RAFT cluster stable with leader elected
+- [ ] Gateway connects to leader automatically
+- [ ] Frontend loads and connects via WebSocket
+- [ ] Drawing strokes sync across browser tabs
+- [ ] Leader failover works (kill leader, new one elected)
+- [ ] No data loss during failover
+- [ ] Replica3 sync issue resolved (optional for basic functionality)
 */
