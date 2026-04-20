@@ -31,6 +31,10 @@ app.post('/broadcast', (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/health', (req, res) => {
+  res.json({ status: 'healthy', service: 'gateway' });
+});
+
 app.listen(4000, () => {
   console.log("HTTP server running on 4000");
 });

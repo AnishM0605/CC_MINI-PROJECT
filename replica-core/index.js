@@ -156,19 +156,24 @@ class RaftCore {
    * @returns {object} { voteGranted, term }
    */
   handleRequestVote(args) {
-    // Leaders reject RequestVote
+    // If a candidate or leader sends a higher term, step down first.
+    if (args.term > this.nodeState.currentTerm) {
+      if (this.stateMachine.isLeader()) {
+        this.timerService.stopHeartbeatTimer();
+      }
+      this.nodeState.currentTerm = args.term;
+      this.nodeState.votedFor = null;
+      this.termManager.updateTerm(args.term);
+      this.stateMachine.becomeFollower(args.term);
+      this._startElectionTimer();
+    }
+
+    // Leaders reject RequestVote only when the term is not higher.
     if (this.stateMachine.isLeader()) {
       return { voteGranted: false, term: this.nodeState.currentTerm };
     }
 
     const result = this.election.handleRequestVote(args);
-
-    // Update state based on term
-    if (args.term > this.nodeState.currentTerm) {
-      this.stateMachine.becomeFollower(args.term);
-      this._startElectionTimer();
-    }
-
     return result;
   }
 
@@ -192,21 +197,24 @@ class RaftCore {
   handleAppendEntries(args) {
     const result = this.heartbeat.handleAppendEntries(args);
 
-    // Reset election timer on any valid AppendEntries from leader
-    if (args.term >= this.nodeState.currentTerm && result.success) {
-      this._startElectionTimer();
-
-      if (args.term > this.nodeState.currentTerm) {
-        this.stateMachine.becomeFollower(args.term);
-      }
-    }
-
-    // Become follower if we see higher term
+    // If a higher term leader is contacting us, step down first.
     if (args.term > this.nodeState.currentTerm) {
+      if (this.stateMachine.isLeader()) {
+        this.timerService.stopHeartbeatTimer();
+      }
       this.nodeState.currentTerm = args.term;
       this.nodeState.votedFor = null;
       this.stateMachine.becomeFollower(args.term);
     }
+
+    // If candidate receives AppendEntries with same or higher term, become follower
+    if (this.stateMachine.isCandidate() && args.term >= this.nodeState.currentTerm) {
+      this.stateMachine.becomeFollower(args.term);
+    }
+
+    // Reset election timer on any AppendEntries received (even if rejected)
+    // This prevents unnecessary elections when there's leader activity
+    this._startElectionTimer();
 
     return result;
   }
@@ -381,7 +389,7 @@ class RaftCore {
     this.timerService.stopElectionTimer();
     this.timerService.startHeartbeatTimer(() => this._sendHeartbeats());
 
-    // Send initial heartbeats
+    // Send initial heartbeats immediately to prevent follower timeouts
     this._sendHeartbeats();
   }
 
@@ -396,6 +404,7 @@ class RaftCore {
 
     // Heartbeat data is prepared by the replica instances
     // This method just logs that heartbeats should be sent
+    // Actual sending is done by replicateToFollowers in the replica server
   }
 
   /**

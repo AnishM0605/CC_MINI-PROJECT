@@ -2,6 +2,13 @@ const axios = require('axios');
 const { getLeader, setLeader } = require('./leaderManager');
 const { replicas } = require('./config');
 
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 500; // ms
+
+async function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function forwardToLeader(stroke) {
   let leader = getLeader();
   const attempted = new Set();
@@ -23,22 +30,33 @@ async function forwardToLeader(stroke) {
     }
   }
 
+  // Try current leader first
   if (await tryPost(leader)) {
     return;
   }
 
   console.log('Leader failed. Trying other replicas...');
 
-  for (let r of replicas) {
-    if (attempted.has(r)) continue;
-    if (await tryPost(r)) {
-      setLeader(r);
-      console.log('Switched leader to', r);
-      return;
+  // Try other replicas to find new leader with retries
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    for (let r of replicas) {
+      if (attempted.has(r)) continue;
+      if (await tryPost(r)) {
+        setLeader(r);
+        console.log('Switched leader to', r);
+        return;
+      }
+    }
+    
+    // Wait before retrying
+    if (attempt < MAX_RETRIES - 1) {
+      console.log(`Retry attempt ${attempt + 1}/${MAX_RETRIES - 1}...`);
+      await sleep(RETRY_DELAY);
+      attempted.clear(); // Clear attempted set for retry
     }
   }
 
-  console.error('All replicas unreachable or no leader available');
+  console.error('All replicas unreachable or no leader available after retries');
 }
 
 module.exports = { forwardToLeader };

@@ -12,8 +12,8 @@ module.exports = {
   },
 
   // Timing (milliseconds)
-  ELECTION_TIMEOUT_MIN: 500,
-  ELECTION_TIMEOUT_MAX: 800,
+  ELECTION_TIMEOUT_MIN: 1000,
+  ELECTION_TIMEOUT_MAX: 2000,
   HEARTBEAT_INTERVAL: 150,
 
   // Quorum

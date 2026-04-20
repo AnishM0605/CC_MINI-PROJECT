@@ -1,7 +1,7 @@
 module.exports = {
   replicas: [
-    "http://localhost:5001",
-    "http://localhost:5002",
-    "http://localhost:5003"
+    "http://replica1:5001",
+    "http://replica2:5002",
+    "http://replica3:5003"
   ]
 };

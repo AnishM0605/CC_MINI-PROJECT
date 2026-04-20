@@ -98,7 +98,7 @@ class ReplicaServer {
         const leader = this.findLeader();
         return res.status(400).json({
           error: 'Not leader',
-          leader: leader ? leader.url : null,
+          leaderUrl: leader ? leader.url : null,
         });
       }
 
@@ -148,6 +148,21 @@ class ReplicaServer {
         this.raftCore.handleReplicationSuccess(args.leaderId, result.lastLogIndex);
       } else {
         this.raftCore.handleReplicationFailure(args.leaderId, result.conflictIndex);
+        
+        // Check if we need to request sync
+        const syncRequest = this.raftCore.checkAndRequestSync(
+          args.leaderId,
+          args.prevLogIndex,
+          args.prevLogTerm
+        );
+        
+        if (syncRequest) {
+          console.log(`[${this.nodeId}] Requesting sync from ${args.leaderId} starting at index ${syncRequest.fromIndex}`);
+          this.requestSyncLog(args.leaderId, syncRequest.fromIndex)
+            .catch(err => {
+              console.warn(`[${this.nodeId}] Sync request failed:`, err.message);
+            });
+        }
       }
 
       res.json(result);
@@ -248,66 +263,59 @@ class ReplicaServer {
     const now = Date.now();
     const otherNodeIds = this.raftCore.otherNodeIds;
 
-    for (const nodeId of otherNodeIds) {
-      // ALWAYS send heartbeat (even during backoff), but skip full replication
-      const inBackoff = this.followerBackoffUntil[nodeId] && now < this.followerBackoffUntil[nodeId];
+    // Send replication to all followers in parallel
+    const replicationPromises = otherNodeIds.map(nodeId => 
+      this._replicateToFollower(nodeId, now)
+    );
 
-      let appendEntries = this.raftCore.prepareAppendEntries(nodeId);
-      if (!appendEntries) continue;
+    // Wait for all replications to complete (don't fail if one fails)
+    await Promise.allSettled(replicationPromises);
+  }
 
-      // If in backoff and this contains entries, skip it (heartbeat-only will be sent)
-      if (inBackoff && appendEntries.entries && appendEntries.entries.length > 0) {
-        continue;
-      }
+  async _replicateToFollower(nodeId, now) {
+    // ALWAYS send heartbeat (even during backoff), but skip full replication
+    const inBackoff = this.followerBackoffUntil[nodeId] && now < this.followerBackoffUntil[nodeId];
 
-      let node = this.otherNodes.find(n => n.id === nodeId);
-      if (!node) continue;
+    let appendEntries = this.raftCore.prepareAppendEntries(nodeId);
+    if (!appendEntries) return;
 
-      try {
-        let response = await axios.post(`${node.url}/append-entries`, appendEntries, {
-          timeout: 6000,
-        });
+    // If in backoff and this contains entries, skip it (heartbeat-only will be sent)
+    if (inBackoff && appendEntries.entries && appendEntries.entries.length > 0) {
+      return;
+    }
 
-        if (response.data.success) {
-          this.raftCore.handleReplicationSuccess(nodeId, response.data.lastLogIndex);
-          // Reset retry counter on success
-          this.followerRetries[nodeId] = 0;
-          this.followerBackoffUntil[nodeId] = 0;
-        } else {
-          // Replication failed - check if sync is needed
-          this.raftCore.handleReplicationFailure(nodeId, response.data.conflictIndex);
-          this.followerRetries[nodeId]++;
+    let node = this.otherNodes.find(n => n.id === nodeId);
+    if (!node) return;
 
-          // Exponential backoff: 100ms * 2^retries, capped at 5s
-          const backoffMs = Math.min(100 * Math.pow(2, this.followerRetries[nodeId]), 5000);
-          this.followerBackoffUntil[nodeId] = now + backoffMs;
+    try {
+      let response = await axios.post(`${node.url}/append-entries`, appendEntries, {
+        timeout: 1000,
+      });
 
-          // Check if we need to request sync for this follower
-          const syncRequest = this.raftCore.checkAndRequestSync(
-            this.nodeId,  // leaderId
-            appendEntries.prevLogIndex,
-            appendEntries.prevLogTerm
-          );
-
-          if (syncRequest) {
-            console.log(`[${this.nodeId}] Requesting sync for ${nodeId} from index ${syncRequest.fromIndex}`);
-            this.requestSyncLog(nodeId, syncRequest.fromIndex)
-              .catch(err => {
-                console.warn(`[${this.nodeId}] Sync request failed for ${nodeId}`);
-              });
-          }
-        }
-      } catch (err) {
-        // Increment retry counter on error
+      if (response.data.success) {
+        this.raftCore.handleReplicationSuccess(nodeId, response.data.lastLogIndex);
+        // Reset retry counter on success
+        this.followerRetries[nodeId] = 0;
+        this.followerBackoffUntil[nodeId] = 0;
+      } else {
+        // Replication failed - check if sync is needed
+        this.raftCore.handleReplicationFailure(nodeId, response.data.conflictIndex);
         this.followerRetries[nodeId]++;
 
         // Exponential backoff: 100ms * 2^retries, capped at 5s
         const backoffMs = Math.min(100 * Math.pow(2, this.followerRetries[nodeId]), 5000);
         this.followerBackoffUntil[nodeId] = now + backoffMs;
-
-        console.warn(`[${this.nodeId}] Error replicating to ${nodeId}: ${err.code || err.name} (attempt ${this.followerRetries[nodeId]}, backoff ${backoffMs}ms)`);
-        this.raftCore.handleReplicationFailure(nodeId);
       }
+    } catch (err) {
+      // Increment retry counter on error
+      this.followerRetries[nodeId]++;
+
+      // Exponential backoff: 100ms * 2^retries, capped at 5s
+      const backoffMs = Math.min(100 * Math.pow(2, this.followerRetries[nodeId]), 5000);
+      this.followerBackoffUntil[nodeId] = now + backoffMs;
+
+      console.warn(`[${this.nodeId}] Error replicating to ${nodeId}: ${err.code || err.name} (attempt ${this.followerRetries[nodeId]}, backoff ${backoffMs}ms)`);
+      this.raftCore.handleReplicationFailure(nodeId);
     }
   }
 
@@ -323,7 +331,12 @@ class ReplicaServer {
       } else {
         clearInterval(this.replicationInterval);
       }
-    }, 100); // Replicate every 100ms instead of 50ms to reduce load
+    }, 25); // Replicate every 25ms instead of 50ms to reduce load
+
+    // Send initial replication immediately when becoming leader
+    if (this.raftCore.isLeader()) {
+      this.replicateToFollowers();
+    }
   }
 
   async requestSyncLog(leaderId, fromIndex) {
@@ -353,7 +366,7 @@ class ReplicaServer {
   async requestVotes(requestVoteArgs) {
     const votePromises = this.otherNodes.map(async (node) => {
       try {
-        let response = await axios.post(`${node.url}/request-vote`, requestVoteArgs, { timeout: 3000 });
+        let response = await axios.post(`${node.url}/request-vote`, requestVoteArgs, { timeout: 1000 });
         let data = response.data;
 
         if (data.term > this.raftCore.getTerm()) {
@@ -388,14 +401,25 @@ class ReplicaServer {
   }
 
   async broadcastToGateway(entry) {
-    try {
-      // Send committed stroke to gateway to broadcast to clients
-      await axios.post('http://gateway:4000/broadcast', {
-        type: 'stroke',
-        data: entry.data,
-      });
-    } catch (err) {
-      console.error('Failed to broadcast to gateway:', err.message);
+    const MAX_BROADCAST_RETRIES = 3;
+    const BROADCAST_RETRY_DELAY = 100; // ms
+
+    for (let attempt = 0; attempt < MAX_BROADCAST_RETRIES; attempt++) {
+      try {
+        // Send committed stroke to gateway to broadcast to clients
+        await axios.post('http://gateway:4000/broadcast', {
+          type: 'stroke',
+          data: entry.data,
+        }, { timeout: 2000 });
+        return; // Success
+      } catch (err) {
+        if (attempt < MAX_BROADCAST_RETRIES - 1) {
+          console.warn(`[${this.nodeId}] Broadcast attempt ${attempt + 1} failed, retrying...`);
+          await new Promise(resolve => setTimeout(resolve, BROADCAST_RETRY_DELAY));
+        } else {
+          console.error(`[${this.nodeId}] Failed to broadcast to gateway after ${MAX_BROADCAST_RETRIES} attempts:`, err.message);
+        }
+      }
     }
   }
 

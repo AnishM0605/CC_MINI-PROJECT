@@ -1,4 +1,4 @@
-let currentLeader = "http://localhost:5001";
+let currentLeader = "http://replica1:5001";
 
 function getLeader() {
   return currentLeader;

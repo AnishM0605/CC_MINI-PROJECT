@@ -57,6 +57,7 @@ class TimerService {
       clearTimeout(this.electionTimer);
       this.electionTimer = null;
     }
+    this.electionTimeoutHandler = null;
   }
 
   /**
