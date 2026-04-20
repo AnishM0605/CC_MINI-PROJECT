@@ -98,6 +98,52 @@ The RAFT Core contains **no external dependencies** - pure JavaScript ES6.
 **Minimal changes needed:**
 - Add `/leader` HTTP endpoint to receive leader notifications
 - Add `/broadcast` HTTP endpoint to receive committed entries
+
+## 🚧 Current Project Status & Pending Items
+
+### ✅ Completed Components
+- **RAFT Core Implementation**: Full consensus protocol with election, replication, safety
+- **Gateway Service**: WebSocket server with leader routing and broadcasting
+- **Frontend**: Canvas drawing with real-time sync
+- **Basic Replica Servers**: HTTP endpoints for RAFT RPCs
+- **Documentation**: Comprehensive guides and API references
+
+### ❌ Pending/Missing Components
+
+#### Docker & Deployment
+- **docker-compose.yml**: ✅ Now implemented with bind mounts and health checks
+- **Separate Replica Containers**: ✅ Implemented with replica1/, replica2/, replica3/ folders
+- **Bind-Mounted Hot-Reload**: ✅ Implemented with nodemon in Docker
+- **Zero-Downtime Rolling Replacement**: ✅ Graceful shutdown implemented
+- **Health Checks**: ✅ Added to docker-compose.yml
+
+#### Testing & Reliability
+- **State Persistence**: ✅ Implemented (stateless gateway, persistent replicas)
+- **Graceful Restart/Reload**: ✅ Implemented with SIGTERM handling
+- **Stress Testing for Concurrent Clients**: ❌ Not implemented - needs load testing script
+- **No Testing for Chaotic/Stress Conditions**: ❌ Not implemented - needs chaos testing
+- **No Integration with Docker Health Checks**: ✅ Now integrated
+- **Stress/Chaos Testing**: ❌ Not implemented - needs tools for multiple rapid failures
+- **Load Testing**: ❌ Not implemented - can't simulate concurrent client load
+
+#### Production Readiness
+- **Monitoring Dashboard**: ❌ Missing - no UI for leader, term, log sizes
+- **Network Partition Simulation**: ❌ Bonus feature not implemented
+- **Automated Failover Testing**: ❌ Needs scripted tests
+
+### 📋 Implementation Notes
+- **Hot-Reload**: Uses nodemon in Docker containers with bind mounts
+- **Health Checks**: curl-based checks for all services
+- **State Persistence**: Replicas persist to JSON files, gateway is stateless
+- **Graceful Shutdown**: SIGTERM handling with state persistence before exit
+- **Network**: Docker bridge network for service communication
+
+### 🎯 Next Steps for Completion
+1. **Implement Stress Testing**: Create scripts for concurrent client simulation
+2. **Add Monitoring Dashboard**: Web UI showing cluster status
+3. **Chaos Testing**: Scripts to simulate network failures and rapid restarts
+4. **Load Testing**: Tools to test high-concurrency scenarios
+5. **Bonus Features**: Network partitions, 4th replica, undo/redo
 - Current WebSocket integration works as-is
 
 ### For Team 3 (Replicas + DevOps)

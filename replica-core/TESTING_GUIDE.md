@@ -490,4 +490,38 @@ SUCCESS CRITERIA:
 - [ ] Leader failover works (kill leader, new one elected)
 - [ ] No data loss during failover
 - [ ] Replica3 sync issue resolved (optional for basic functionality)
+// ============================================================================
+// INTEGRATION TESTING SCRIPTS
+// ============================================================================
+
+/*
+These scripts test the full distributed system under various conditions.
+Run them after starting docker-compose up.
 */
+
+// STRESS TESTING: Concurrent Client Load
+// Usage: node stress-test.js [numClients] [durationMs]
+// Example: node stress-test.js 50 60000
+//
+// Simulates multiple WebSocket clients sending drawing strokes concurrently.
+// Tests Gateway and RAFT cluster under load.
+
+// CHAOS TESTING: Failure Simulation
+// Usage: node chaos-test.js
+//
+// Simulates network failures, container restarts, and leader failures.
+// Tests system resilience under chaotic conditions.
+
+// DOCKER TESTING WORKFLOW:
+// 1. Start system: docker-compose up --build
+// 2. Wait for health checks to pass
+// 3. Run stress test: node stress-test.js 20 30000
+// 4. Run chaos test: node chaos-test.js
+// 5. Monitor logs: docker-compose logs -f
+// 6. Open frontend: http://localhost:8080 (if exposed)
+
+// EXPECTED BEHAVIORS:
+// - Stress test: High throughput, no dropped messages, consistent state
+// - Chaos test: Automatic failover, state preservation, zero downtime
+// - Hot-reload: Edit replica1/index.js, container restarts gracefully
+*/*/
